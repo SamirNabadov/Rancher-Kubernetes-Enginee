@@ -10,8 +10,6 @@ Configured software and tools
 * RKE v1.3.1
 * Kubernetes v1.21.5
 * Docker 20.10.10
-* kubectl 1.22.1
-* Helm 3.7.1
 * Cert-manager v1.5.1
 * Rancher v2.6.2
 * Metallb 2.5.10
