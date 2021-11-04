@@ -120,7 +120,7 @@
     - inventory_hostname in groups["k8s_masters"][0]
 
 - name: Install Metallb with Helm
-  command: "{{ helm_binary }} upgrade --install metallb {{ helm_metallb__repo }}/metallb --kubeconfig {{ rke_cluster_kube_config }} --namespace metallb --set configInline.address-pools[0].name=default --set configInline.address-pools[0].protocol=layer2 --set configInline.address-pools[0].addresses={192.168.120.230-192.168.120.250}"
+  command: "{{ helm_binary }} upgrade --install metallb {{ helm_metallb__repo }}/metallb --kubeconfig {{ rke_cluster_kube_config }} --namespace metallb --set configInline.address-pools[0].name=default --set configInline.address-pools[0].protocol=layer2 --set configInline.address-pools[0].addresses={192.168.1.100-192.168.1.250}"
   changed_when: false
   ignore_errors: yes
   run_once: yes
@@ -194,7 +194,7 @@
     seconds: "20"
 
 - name: Install ingress-external with Helm
-  command: "{{ helm_binary }} upgrade --install ingress-external {{ helm_ingress_repo }}/ingress-nginx --kubeconfig {{ rke_cluster_kube_config }} --namespace ingress-external --set controller.kind=daemonset --set controller.service.loadBalancerIP=192.168.120.230"
+  command: "{{ helm_binary }} upgrade --install ingress-external {{ helm_ingress_repo }}/ingress-nginx --kubeconfig {{ rke_cluster_kube_config }} --namespace ingress-external --set controller.kind=daemonset --set controller.service.loadBalancerIP={{ loadBalancerIP }}"
   changed_when: false
   ignore_errors: yes
   run_once: yes

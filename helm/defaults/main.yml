@@ -23,6 +23,7 @@ helm_metallb_repo_url: https://charts.bitnami.com/bitnami
 helm_ingress_version: ""
 helm_ingress_repo: ingress-nginx
 helm_ingress_repo_url: https://kubernetes.github.io/ingress-nginx
+loadBalancerIP: 192.168.1.101
 
 helm_rancher_repo: rancher-latest
 helm_rancher_repo_url: https://releases.rancher.com/server-charts/latest
