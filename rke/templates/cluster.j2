@@ -1,0 +1,50 @@
+cluster_name: {{ cluster_name }}
+name: {{ cluster_name }}
+enable_cluster_alerting: true
+enable_cluster_monitoring: true
+ignore_docker_version: true
+
+nodes:
+{% for host in groups.k8s_masters %}
+  - address: {{ hostvars[host]['ansible_host'] }}
+    hostname_override: {{ host }}
+    user: rke
+    labels:
+      master: yes
+      location: delta
+    role: [controlplane, etcd]
+
+{% endfor %}
+
+{% for host in groups.k8s_workers %}
+  - address: {{ hostvars[host]['ansible_host'] }}
+    hostname_override: {{ host }}
+    user: rke
+    labels:
+      worker: yes
+      location: delta
+    role: [worker]
+
+{% endfor %}
+
+services:
+  etcd:
+    snapshot: true
+    creation: 6h
+    retention: 30h
+  kube-controller:
+    extra_args:
+      terminated-pod-gc-threshold: 100
+  kubelet:
+    extra_args:
+      max-pods: 250
+    cluster_domain: {{ cluster_name }}
+
+network:
+    plugin: calico
+ingress:
+  provider: nginx
+  options:
+    use-forwarded-headers: "true"
+monitoring:
+  provider: "metrics-server"

@@ -1,0 +1,233 @@
+---
+# tasks file for helm
+- name: Creates directory .kube
+  file:
+    path: "{{ rke_config_folder }}"
+    state: directory
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Copy content kube_config_cluster.yaml
+  command: cat "{{ rke_home }}/kube_config_cluster.yaml"
+  register: kube_config
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Create kube config file
+  copy:
+    content: "{{ kube_config.stdout }}"
+    dest: "{{ rke_cluster_kube_config }}"
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Check cert-manager namespace is available
+  shell: "{{ kubectl_binary }} get namespace | grep 'cert-manager'"
+  register: namespace
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  ignore_errors: yes
+  changed_when: false
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Create namespace for cert-manager
+  command: "{{ kubectl_binary }} create namespace cert-manager"
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+    - "'cert-manager' not in namespace.stdout"
+
+- name: Check metallb namespace is available
+  shell: "{{ kubectl_binary }} get namespace | grep 'metallb'"
+  register: namespace
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  ignore_errors: yes
+  changed_when: false
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Create namespace for metallb
+  command: "{{ kubectl_binary }} create namespace metallb"
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+    - "'metallb' not in namespace.stdout"
+
+- name: Check ingress-external namespace is available
+  shell: "{{ kubectl_binary }} get namespace | grep 'ingress-external'"
+  register: namespace
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  ignore_errors: yes
+  changed_when: false
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: create namespace for ingress-external
+  command: "{{ kubectl_binary }} create namespace ingress-external"
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+    - "'ingress-external' not in namespace.stdout"
+
+- name: Add repo ingress-nginx to Helm
+  command: "{{ helm_binary }} repo add --kubeconfig {{ rke_cluster_kube_config }} {{ helm_ingress_repo }} {{ helm_ingress_repo_url }}"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_ingress_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Add repo metallb to Helm
+  command: "{{ helm_binary }} repo add --kubeconfig {{ rke_cluster_kube_config }} {{ helm_metallb__repo }} {{ helm_metallb_repo_url }}"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_metallb_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Add repo Rancher to Helm
+  command: "{{ helm_binary }} repo add --kubeconfig {{ rke_cluster_kube_config }} {{ helm_rancher_repo }} {{ helm_rancher_repo_url }}"
+  changed_when: false
+  run_once: yes
+  when:
+      - rancher_rancher_enabled
+      - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Add repo Cert-Manager to Helm
+  command: "{{ helm_binary }} repo add --kubeconfig {{ rke_cluster_kube_config }} {{ helm_certmanager_jetstack_repo }} {{ helm_certmanager_jetstack_repo_url }}"
+  changed_when: false
+  run_once: yes
+  when:
+    - inventory_hostname in groups["k8s_masters"][0]
+    - rancher_certmanager_enabled
+  
+- name: Helm repo update
+  command: "{{ helm_binary }} repo update --kubeconfig {{ rke_cluster_kube_config }}"
+  changed_when: false
+  run_once: yes
+  when:
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Install Metallb with Helm
+  command: "{{ helm_binary }} upgrade --install metallb {{ helm_metallb__repo }}/metallb --kubeconfig {{ rke_cluster_kube_config }} --namespace metallb --set configInline.address-pools[0].name=default --set configInline.address-pools[0].protocol=layer2 --set configInline.address-pools[0].addresses={192.168.120.230-192.168.120.250}"
+  changed_when: false
+  ignore_errors: yes
+  run_once: yes
+  when:
+    - rancher_metallb_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for metallb-controller to be ready
+  command: "{{ kubectl_binary }} -n metallb --kubeconfig {{ rke_cluster_kube_config }} rollout status deploy/metallb-controller"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_metallb_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for metallb-speaker to be ready
+  command: "{{ kubectl_binary }} -n metallb --kubeconfig {{ rke_cluster_kube_config }} rollout status daemonset/metallb-speaker"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_metallb_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait 20 seconds for metallb to properly run
+  pause:
+    seconds: "20"
+
+- name: Install CRD's for CertManager
+  command: "{{ kubectl_binary }} --kubeconfig {{ rke_cluster_kube_config }} apply --validate=false -f {{ rancher_certmanager_crd_url }}"
+  changed_when: false
+  ignore_errors: yes
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Install Cert-Manager
+  command: "{{ helm_binary }} upgrade --install cert-manager {{ helm_certmanager_jetstack_repo }}/cert-manager --kubeconfig {{ rke_cluster_kube_config }} --namespace cert-manager --create-namespace --version {{ helm_certmanager_version }}"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for certmanager to be ready
+  command: "{{ kubectl_binary }} -n cert-manager --kubeconfig {{ rke_cluster_kube_config }} rollout status deploy/cert-manager"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for certmanager cainjector to be ready
+  command: "{{ kubectl_binary }} -n cert-manager --kubeconfig {{ rke_cluster_kube_config }} rollout status deploy/cert-manager-cainjector"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for certmanager webhook to be ready
+  command: "{{ kubectl_binary }} -n cert-manager --kubeconfig {{ rke_cluster_kube_config }} rollout status deploy/cert-manager-webhook"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait 20 seconds for cert-manager to properly run
+  pause:
+    seconds: "20"
+
+- name: Install ingress-external with Helm
+  command: "{{ helm_binary }} upgrade --install ingress-external {{ helm_ingress_repo }}/ingress-nginx --kubeconfig {{ rke_cluster_kube_config }} --namespace ingress-external --set controller.kind=daemonset --set controller.service.loadBalancerIP=192.168.120.230"
+  changed_when: false
+  ignore_errors: yes
+  run_once: yes
+  when:
+    - rancher_ingress_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for ingress-external-nginx-ingress to be ready
+  command: "{{ kubectl_binary }} -n ingress-external --kubeconfig {{ rke_cluster_kube_config }} rollout status daemonset/ingress-external-ingress-nginx-controller"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_ingress_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait 20 seconds for nginx-ingress to properly run
+  pause:
+    seconds: "20"
+
+- name: Install Rancher with Helm
+  command: "{{ helm_binary }} upgrade --install rancher {{ helm_rancher_repo }}/rancher --kubeconfig {{ rke_cluster_kube_config }} --namespace cattle-system --set hostname={{ rancher_hostname }} --set replicas=3"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - rancher_rancher_enabled
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Wait for Rancher deployment to be ready
+  command: "{{ kubectl_binary }} -n cattle-system --kubeconfig {{ rke_cluster_kube_config }} rollout status deploy/rancher"
+  changed_when: false
+  run_once: yes
+  when:
+    - rancher_certmanager_enabled
+    - rancher_rancher_enabled
+    - inventory_hostname in groups["k8s_masters"][0]

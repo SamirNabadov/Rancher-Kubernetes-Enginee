@@ -1,0 +1,80 @@
+---
+# General Settings
+owner: "ansible"
+group: "ansible"
+binary_mode: "0755"
+bin_directory: "/usr/local/bin"
+tmp_directory: "{{ lookup('env', 'TMPDIR') | default('/tmp',true) }}"
+os: "linux" 
+arch: "amd64" 
+architecture: 'amd64'
+
+# Kubectl Settings
+kubectl_version: "1.22.1"
+kubectl_download_filetype: "binary"
+
+# RKE Settings
+rke_release: v1.3.1
+rke_binary_url: "https://github.com/rancher/rke/releases/download/{{ rke_release }}/rke_linux-amd64"
+rke_user: rke
+rke_group: rke
+rke_password: rke
+rke_home: /home/rke
+cluster_name: k8s.example.com
+
+# Helm Settings
+helm_version: '3.7.1'
+helm_filename: 'helm-v{{ helm_version }}-{{ os }}-{{ architecture }}.tar.gz'
+helm_mirror: 'https://get.helm.sh'
+helm_install_dir: '/usr/local/share/helm'
+helm_binary: '/usr/local/bin/helm'
+
+# URL for download docker ce
+docker_ce_url: https://download.docker.com/linux/centos/docker-ce.repo
+
+# Kernel modules for RKE
+kernel_modules:
+      - br_netfilter
+      - ip6_udp_tunnel
+      - ip_set
+      - ip_set_hash_ip
+      - ip_set_hash_net
+      - iptable_filter
+      - iptable_nat
+      - iptable_mangle
+      - iptable_raw
+      - nf_conntrack_netlink
+      - nf_conntrack
+      - nf_conntrack_ipv4
+      - nf_defrag_ipv4
+      - nf_nat
+      - nf_nat_ipv4
+      - nf_nat_masquerade_ipv4
+      - udp_tunnel
+      - veth
+      - vxlan
+      - x_tables
+      - xt_addrtype
+      - xt_conntrack
+      - xt_comment
+      - xt_mark
+      - xt_multiport
+      - xt_nat
+      - xt_recent
+      - xt_set
+      - xt_statistic
+      - xt_tcpudp
+
+# Necessary packages
+cluster_packages:
+    - device-mapper-persistent-data
+    - lvm2
+    - yum-utils
+    - vim
+    - wget 
+    - curl
+    - epel-release
+    - bash-completion
+    - iscsi-initiator-utils
+
+

@@ -1,0 +1,8 @@
+---
+- name: Deploying Helm Charts
+  hosts: k8s_nodes
+  any_errors_fatal: true
+  become: true
+  become_user: root
+  roles:
+    - {role: helm}

@@ -1,0 +1,322 @@
+- name: Download kubectl binary
+  get_url:
+    url: "https://storage.googleapis.com/kubernetes-release/release/v{{ kubectl_version }}/bin/{{ os }}/{{ arch }}/kubectl"
+    dest: "{{ tmp_directory }}"
+
+- name: Copy kubectl binary to destination directory
+  copy:
+    src: "{{ tmp_directory }}/{{ item }}"
+    dest: "{{ bin_directory }}/{{ item }}"
+    mode: "{{ binary_mode }}"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    remote_src: yes
+  loop:
+    - kubectl
+
+- name: checking kubectl client version
+  shell: "{{ bin_directory }}/kubectl version --client"
+  register: kubectl_client_version
+
+- name: Show register kubectl_client_version
+  debug:
+    var: kubectl_client_version
+
+- name: Download rke binary
+  get_url:
+    url: "https://github.com/rancher/rke/releases/download/{{ rke_release }}/rke_linux-amd64"
+    dest: "{{ tmp_directory }}"
+
+- name: Copy rke binary to destination directory
+  copy:
+    src: "{{ tmp_directory }}/rke_linux-amd64"
+    dest: "{{ bin_directory }}/{{ item }}"
+    mode: "{{ binary_mode }}"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    remote_src: yes
+  loop:
+    - rke
+
+- name: Download helm
+  get_url:
+    url: '{{ helm_mirror }}/{{ helm_filename }}'
+    dest: '{{ tmp_directory }}/{{ helm_filename }}'
+    mode: 'u=rw,go=r'
+
+- name: Check helm current version
+  command: >
+    {{ helm_install_dir }}/helm version --client --template {{ "'{{ if .Version }}{{ .Version }}{{ else }}{{ .Client.SemVer }}{{ end }}'" }}
+  register: helm_current_version
+  failed_when: no
+  changed_when: no
+
+- name: Helm current version
+  debug:
+    msg: '{{ helm_current_version.stdout }}'
+  when: helm_current_version.rc == 0
+
+- name: Remove existing installation
+  become: yes
+  file:
+    path: '{{ helm_install_dir }}'
+    state: absent
+  when:
+    - helm_current_version.rc == 0
+    - helm_current_version.stdout != ('v' + helm_version)
+
+- name: Create the Helm installation dir
+  become: yes
+  file:
+    state: directory
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: 'u=rwx,go=rx'
+    dest: '{{ helm_install_dir }}'
+
+- name: Install unarchive module dependencies
+  become: yes
+  yum:
+    name:
+      - tar
+      - unzip
+      - gzip
+    state: present
+
+- name: Install helm
+  become: yes
+  unarchive:
+    src: '{{ tmp_directory }}/{{ helm_filename }}'
+    remote_src: yes
+    dest: '{{ helm_install_dir }}'
+    extra_opts:
+     - '--strip-components=1'
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: 'o-w'
+    creates: '{{ helm_install_dir }}/helm'
+
+- name: Create helm link
+  become: yes
+  file:
+    src: "{{ helm_install_dir }}/helm"
+    dest: "{{ helm_binary }}"
+    state: link
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: 'u=rwx,go=rx'
+  ignore_errors: yes
+
+- name: Rename hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Upgrade all packages
+  yum: 
+    name: "*" 
+    state: latest
+    update_cache: yes
+
+- name: Reboot the servers
+  shell: "sleep 5 && reboot"
+  async: 1
+  poll: 0
+
+- name: Wait for the reboot to complete if there was a change.
+  wait_for_connection:
+    connect_timeout: 10
+    sleep: 5
+    delay: 5
+    timeout: 300
+
+- name: Check the Uptime of the servers
+  shell: "uptime"
+  register: uptime
+
+- name: Check uptime
+  debug: 
+    var: uptime.stdout
+
+- name: Create group for rke user
+  group:
+    name: "{{ rke_group }}"
+    state: present
+
+- name: Add RKE user
+  user:
+    name: "{{ rke_user }}"
+    password: "{{ rke_password|password_hash('sha512') }}"
+    groups: "{{ rke_group }}"
+    shell: /bin/bash
+
+- name: Create sudo file
+  file:
+    path: /etc/sudoers.d/rke
+    state: touch
+    
+- name: Give rke user passwordless sudo
+  lineinfile:
+    path: /etc/sudoers.d/rke
+    state: present
+    line: 'rke ALL=(ALL:ALL) NOPASSWD: ALL'
+
+- name: Update the /etc/hosts file with node names
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ item }}$'
+    line: "{{ hostvars[item].ansible_host }} {{item}}"
+    state: present
+  when: 
+    - hostvars[item].ansible_host is defined
+  loop: "{{ groups.all }}"
+
+- name: Generate ssh key on master node
+  shell: ssh-keygen -q -t rsa -N '' <<< ""$'\n'"y" 2>&1 >/dev/null
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+  
+- name: Get ssh key from master node
+  shell: cat "{{ rke_home }}/.ssh/id_rsa.pub"
+  become_user: "{{ rke_user }}"
+  register: key
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Create .ssh direcotry
+  file:
+    path: "{{ rke_home }}/.ssh"
+    state: directory
+  become_user: "{{ rke_user }}"
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Create authorized_keys empty file
+  file:
+    path: "{{ rke_home }}/.ssh/authorized_keys"
+    state: touch
+  become_user: "{{ rke_user }}"
+
+- name: Copy public key to remote nodes
+  become_user: "{{ rke_user }}"
+  lineinfile:
+    path: "{{ rke_home }}/.ssh/authorized_keys"
+    line: "{{ key.stdout }}"
+  
+- name: Load kernel modules for RKE
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ kernel_modules }}"
+  ignore_errors: yes
+
+- name: Disable SELinux
+  selinux:
+    state: disabled
+
+- name: Stopped Firewall service
+  service:
+    name: firewalld
+    state: stopped
+    enabled: False
+
+- name: Disable SWAP since kubernetes can't work with swap enabled (1/2)
+  shell: |
+    swapoff -a
+     
+- name: Disable SWAP in fstab since kubernetes can't work with swap enabled (2/2)
+  replace:
+    path: /etc/fstab  
+    regexp: '^([^#].*?\sswap\s+.*)$'
+    replace: '# \1'
+
+- name: Modify sysctl entries
+  sysctl:
+    name: '{{ item.key }}'
+    value: '{{ item.value }}'
+    sysctl_set: yes
+    state: present
+    reload: yes
+  loop:
+    - {key: net.bridge.bridge-nf-call-ip6tables, value: 1}
+    - {key: net.bridge.bridge-nf-call-iptables,  value: 1}
+    - {key: net.ipv4.ip_forward,  value: 1}
+
+- name: Install rke cluster prerequisites
+  yum:
+    name: "{{ item }}"
+    state: latest
+  loop:
+    - "{{ cluster_packages }}"
+
+- name: Configuring docker-ce repo
+  get_url:
+    url: "{{ docker_ce_url }}"
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: 0644
+
+- name: Yum clean cache
+  command: yum clean all
+
+- name: Install Docker CE
+  yum:
+    name: docker-ce
+    state: latest
+
+- name: Enable docker service
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Adding existing user rke to group docker
+  user:
+    name: "{{ rke_user }}"
+    groups: docker
+    append: yes
+
+- name: Restart docker service
+  service:
+    name: docker
+    state: restarted
+
+- name: Allow SSH TCP Forwarding
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: '^AllowTcpForwarding'
+    line: 'AllowTcpForwarding yes'
+    state: present
+
+- name: Systemctl restart sshd
+  service:
+    name: sshd
+    state: restarted
+
+- name: Create Rancher cluster configuration yaml
+  template:
+    src: cluster.j2
+    dest: "{{ rke_home }}/cluster.yaml"
+    owner: "{{ rke_user }}"
+    group: "{{ rke_group }}"
+    mode: 0640
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: Install cluster rke
+  shell: "/usr/local/bin/rke up --config {{ rke_home }}/cluster.yaml"
+  register: rke_command_result
+  become_user: "{{ rke_user }}"
+  run_once: yes
+  when: 
+    - inventory_hostname in groups["k8s_masters"][0]
+
+- name: RKE installation result
+  debug:
+    var: rke_command_result
+
+- name: Wait 30 seconds for cluster started
+  pause:
+    seconds: "30"

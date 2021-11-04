@@ -1,0 +1,18 @@
+[k8s_masters]
+k8s-m01.example.com ansible_host=192.168.1.101
+k8s-m02.example.com ansible_host=192.168.1.102
+k8s-m03.example.com ansible_host=192.168.1.103
+
+[k8s_workers]
+k8s-w01.example.com ansible_host=192.168.1.104
+k8s-w02.example.com ansible_host=192.168.1.105
+k8s-w03.example.com ansible_host=192.168.1.106
+k8s-w04.example.com ansible_host=192.168.1.107
+k8s-w05.example.com ansible_host=192.168.1.108
+k8s-w06.example.com ansible_host=192.168.1.109
+
+[k8s_nodes:children]
+k8s_masters
+k8s_workers
+
+
