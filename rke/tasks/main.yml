@@ -190,8 +190,6 @@
     path: "{{ rke_home }}/.ssh"
     state: directory
   become_user: "{{ rke_user }}"
-  when: 
-    - inventory_hostname in groups["k8s_masters"][0]
 
 - name: Create authorized_keys empty file
   file:
